@@ -34,7 +34,7 @@ fn enableRawMode() !void {
     raw.lflag.ECHO = false;
     raw.lflag.ICANON = false;
     raw.lflag.IEXTEN = false;
-    raw.lflag.ISIG = true;
+    raw.lflag.ISIG = false;
 
     raw.cc[@intFromEnum(posix.V.MIN)] = 0;
     raw.cc[@intFromEnum(posix.V.TIME)] = 1;
@@ -182,6 +182,7 @@ pub fn Search(cmd_prefix: ?[]const u8, allocator: std.mem.Allocator) !void {
         } else if (key >= 32 and key <= 126) { // CARACTERES DIGITÁVEIS
             addChar(&query, &query_len, key);
         } else if (key == 3) { // CTRL+C
+            disableRawMode();
             break;
         }
     }
