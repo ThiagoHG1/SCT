@@ -9,7 +9,7 @@ fn die(msg: []const u8) noreturn {
     std.process.exit(1);
 }
 
-fn disableRawMode() void {
+pub fn disableRawMode() void {
     posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, orig_termios) catch {};
 }
 
