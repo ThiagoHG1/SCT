@@ -4,7 +4,7 @@ SCT é um selecionador e navegador de arquivos interativo desenvolvido em **Zig*
 
 ## 🚀 Funcionalidades
 
-- **Navegação de Pastas:** `Enter` para entrar, `ESC` ou `Backspace` (quando a busca está vazia) para voltar uma pasta.
+- **Navegação de Pastas:** `Enter` para entrar, `ESC` para voltar uma pasta.
 - **Busca Rápida:** Filtro em tempo real (case-insensitive) conforme você digita.
 - **Execução de Comandos:** Abre o arquivo selecionado usando o prefixo passado (ex: `sct nvim`).
 - **Raw Mode:** Captura de teclas instantânea, sem necessidade de confirmar com Enter para filtrar.
@@ -50,7 +50,7 @@ Tecla	Ação
 Letras/Números	Digite para filtrar a lista em tempo real.
 Enter	Entra em uma pasta ou seleciona o arquivo para abrir com o comando.
 ESC	Volta para o diretório anterior (..).
-Backspace	Apaga um caractere (ou volta uma pasta se a busca estiver vazia).
+Backspace	Apaga um caractere (Em versões anteriores volta uma pasta assim como ESC).
 Ctrl + C	Encerra o programa e volta ao terminal.
 
 ## ⚠️ Observações Técnicas

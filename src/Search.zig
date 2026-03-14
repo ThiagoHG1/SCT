@@ -174,11 +174,7 @@ pub fn Search(cmd_prefix: ?[]const u8, allocator: std.mem.Allocator) !void {
         } else if (key == 127) { // BACKSPACE
             if (query_len > 0) {
                 query_len -= 1;
-            } else {
-                // Se a busca estiver vazia e apertar Backspace, volta uma pasta
-                std.posix.chdir("..") catch continue;
-                try openDir(".", &files, &file_count);
-            }
+            } 
         } else if (key >= 32 and key <= 126) { // CARACTERES DIGITÁVEIS
             addChar(&query, &query_len, key);
         } else if (key == 3) { // CTRL+C
