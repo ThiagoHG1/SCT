@@ -60,3 +60,8 @@ Ctrl + C	Encerra o programa e volta ao terminal.
     Fuzzy Match: A busca ignora maiúsculas/minúsculas para facilitar a digitação rápida.
 
     Raw Mode: O programa desativa o modo canônico do terminal para processar teclas individualmente, restaurando as configurações originais ao sair.
+
+> [!IMPORTANT]
+> Recomenda-se utilizar commits a partir de **8a72e9a**.  
+> Versões anteriores podem causar problemas no TTY, como travamentos ou falhas ao digitar a senha no `sudo`.
+

@@ -3,6 +3,7 @@ const print = @import("Utils.zig").print;
 const posix = std.posix;
 
 var orig_termios: posix.termios = undefined;
+var raw_enabled: bool = false;
 
 fn die(msg: []const u8) noreturn {
     std.debug.print("{s}\r\n", .{msg});
@@ -10,10 +11,15 @@ fn die(msg: []const u8) noreturn {
 }
 
 pub fn disableRawMode() void {
-    posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, orig_termios) catch {};
+    if (raw_enabled) {
+        posix.tcsetattr(posix.STDIN_FILENO, .NOW, orig_termios) catch {};
+        raw_enabled = false;
+    }
 }
 
 fn enableRawMode() !void {
+    if (raw_enabled) return;
+
     orig_termios = posix.tcgetattr(posix.STDIN_FILENO) catch |err| {
         try print("tcgetattr falhou: {}\r\n", .{err});
         std.process.exit(1);
@@ -22,7 +28,6 @@ fn enableRawMode() !void {
     var raw = orig_termios;
 
     raw.iflag.BRKINT = false;
-    raw.iflag.ICRNL = false;
     raw.iflag.INPCK = false;
     raw.iflag.ISTRIP = false;
     raw.iflag.IXON = false;
@@ -34,12 +39,14 @@ fn enableRawMode() !void {
     raw.lflag.ECHO = false;
     raw.lflag.ICANON = false;
     raw.lflag.IEXTEN = false;
-    raw.lflag.ISIG = false;
+    raw.lflag.ISIG = true;
 
     raw.cc[@intFromEnum(posix.V.MIN)] = 0;
     raw.cc[@intFromEnum(posix.V.TIME)] = 1;
 
-    posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, raw) catch die("tcsetattr falhou");
+    posix.tcsetattr(posix.STDIN_FILENO, .NOW, raw) catch die("tcsetattr falhou");
+
+    raw_enabled = true;
 }
 
 fn openDir(path: []const u8, files: *[1024][256]u8, file_count: *usize) !void {
@@ -177,9 +184,6 @@ pub fn Search(cmd_prefix: ?[]const u8, allocator: std.mem.Allocator) !void {
             } 
         } else if (key >= 32 and key <= 126) { // CARACTERES DIGITÁVEIS
             addChar(&query, &query_len, key);
-        } else if (key == 3) { // CTRL+C
-            disableRawMode();
-            break;
-        }
+        } 
     }
 }
