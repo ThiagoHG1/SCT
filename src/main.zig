@@ -1,6 +1,6 @@
 const std = @import("std");
 const Search = @import("Search.zig").Search;
-const disableRawMode = @import("Search.zig").disableRawMode;
+const disableRawMode = @import("terminal.zig").disableRawMode;
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
@@ -19,4 +19,3 @@ pub fn main() !void {
 
     try Search(command, allocator);
 }
-

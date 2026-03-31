@@ -1,74 +1,10 @@
 const std = @import("std");
-const print = @import("Utils.zig").print;
+const p = @import("utils/Print.zig");
+const terminal = @import("terminal.zig");
+const fs = @import("fs.zig");
 const posix = std.posix;
 
-var orig_termios: posix.termios = undefined;
-var raw_enabled: bool = false;
-
-fn die(msg: []const u8) noreturn {
-    std.debug.print("{s}\r\n", .{msg});
-    std.process.exit(1);
-}
-
-pub fn disableRawMode() void {
-    if (raw_enabled) {
-        posix.tcsetattr(posix.STDIN_FILENO, .NOW, orig_termios) catch {};
-        raw_enabled = false;
-    }
-}
-
-fn enableRawMode() !void {
-    if (raw_enabled) return;
-
-    orig_termios = posix.tcgetattr(posix.STDIN_FILENO) catch |err| {
-        try print("tcgetattr falhou: {}\r\n", .{err});
-        std.process.exit(1);
-    };
-
-    var raw = orig_termios;
-
-    raw.iflag.BRKINT = false;
-    raw.iflag.INPCK = false;
-    raw.iflag.ISTRIP = false;
-    raw.iflag.IXON = false;
-
-    raw.oflag.OPOST = false;
-
-    raw.cflag.CSIZE = .CS8;
-
-    raw.lflag.ECHO = false;
-    raw.lflag.ICANON = false;
-    raw.lflag.IEXTEN = false;
-    raw.lflag.ISIG = true;
-
-    raw.cc[@intFromEnum(posix.V.MIN)] = 0;
-    raw.cc[@intFromEnum(posix.V.TIME)] = 1;
-
-    posix.tcsetattr(posix.STDIN_FILENO, .NOW, raw) catch die("tcsetattr falhou");
-
-    raw_enabled = true;
-}
-
-fn openDir(path: []const u8, files: *[1024][256]u8, file_count: *usize) !void {
-    file_count.* = 0;
-    // Abre o diretório atual
-    var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch return;
-    defer dir.close();
-
-    var it = dir.iterate();
-    while (try it.next()) |entry| {
-        if (file_count.* >= 1024) break;
-        
-        // Ignora "." e ".." da listagem para não poluir o visual
-        if (std.mem.eql(u8, entry.name, ".") or std.mem.eql(u8, entry.name, "..")) continue;
-
-        const len = @min(entry.name.len, 255);
-        @memset(files[file_count.*][0..256], 0);
-        @memcpy(files[file_count.*][0..len], entry.name[0..len]);
-        
-        file_count.* += 1;
-    }
-}
+const MAX_VISIBLE: usize = 20;
 
 fn addChar(query: *[1024]u8, query_len: *usize, key: u8) void {
     if (query_len.* >= query.len) return;
@@ -89,101 +25,196 @@ fn isMatch(name: []const u8, query: []const u8) bool {
     return q_idx == query.len;
 }
 
-fn searchFiles(files: []const [256]u8, query: []const u8) !void {
-    try print("\r\n--- Resultados ---\r\n", .{});
+// Estado de render anterior para saber se precisa redesenhar tudo
+const RenderState = struct {
+    query_len: usize,
+    cursor: usize,
+    scroll: usize,
+    file_count: usize,
+    path_hash: u64,
+};
 
-    for (files) |*f| {
-        const name = std.mem.span(@as([*:0]const u8, @ptrCast(f)));
-        if (isMatch(name, query)) {
-            var is_dir = false;
-            
-            const stat = std.fs.cwd().statFile(name) catch null;
-            if (stat) |s| {
-                if (s.kind == .directory) is_dir = true;
-            }
-
-            if (is_dir) {
-                try print("\x1b[34m{s}/\x1b[0m\r\n", .{name}); 
-            } else {
-                try print("{s}\r\n", .{name});
-            }
-        }
+fn hashPath(path: []const u8) u64 {
+    var h: u64 = 14695981039346656037;
+    for (path) |b| {
+        h ^= b;
+        h *%= 1099511628211;
     }
+    return h;
 }
 
 pub fn Search(cmd_prefix: ?[]const u8, allocator: std.mem.Allocator) !void {
-    try enableRawMode();
-    defer disableRawMode();
+    try terminal.enableRawMode();
+    defer terminal.disableRawMode();
 
     var files: [1024][256]u8 = undefined;
     var file_count: usize = 0;
     var query: [1024]u8 = undefined;
     var query_len: usize = 0;
-
-    // Buffer para armazenar o caminho atual (CWD)
+    var cursor: usize = 0;
+    var scroll: usize = 0;
     var cwd_buf: [1024]u8 = undefined;
 
-    try openDir(".", &files, &file_count);
+    try fs.openDir(".", &files, &file_count);
+
+    // Estado anterior — usado para detectar se precisamos full redraw
+    var last_state: ?RenderState = null;
+    var full_redraw = true; // primeiro frame sempre full
+
+    // Buffer de render
+    var render_buf: std.ArrayList(u8) = .empty;
+    defer render_buf.deinit(allocator);
+
+    // Esconde cursor durante render
+    try p.print("\x1b[?25l", .{});
+    defer p.print("\x1b[?25h", .{}) catch {};
 
     while (true) {
-        // Limpa a tela e mostra o cabeçalho
         const current_path = std.fs.cwd().realpath(".", &cwd_buf) catch "---";
-        try print("\x1b[2J\x1b[H", .{}); // Limpa tudo e volta pro topo (0,0)
-        try print("\x1b[32mDiretório: {s}\x1b[0m\r\n", .{current_path});
-        try print("\x1b[1mBusca: {s}\x1b[0m", .{query[0..query_len]});
-        
-        // Renderiza os arquivos filtrados
-        try searchFiles(files[0..file_count], query[0..query_len]);
+        const path_hash = hashPath(current_path);
 
-        // Lê o input do usuário
+        // Monta lista filtrada
+        var filtered: [1024]usize = undefined;
+        var filtered_count: usize = 0;
+        for (files[0..file_count], 0..) |*f, i| {
+            const name = std.mem.sliceTo(f, 0);
+            if (isMatch(name, query[0..query_len])) {
+                filtered[filtered_count] = i;
+                filtered_count += 1;
+            }
+        }
+
+        // Ajusta cursor e scroll
+        if (filtered_count == 0) {
+            cursor = 0;
+            scroll = 0;
+        } else {
+            if (cursor >= filtered_count) cursor = filtered_count - 1;
+            // Scroll segue o cursor
+            if (cursor < scroll) scroll = cursor;
+            if (cursor >= scroll + MAX_VISIBLE) scroll = cursor - MAX_VISIBLE + 1;
+        }
+
+        // Detecta se algo mudou
+        const cur_state = RenderState{
+            .query_len = query_len,
+            .cursor = cursor,
+            .scroll = scroll,
+            .file_count = file_count,
+            .path_hash = path_hash,
+        };
+
+        const needs_full = full_redraw or last_state == null or
+            last_state.?.path_hash != cur_state.path_hash or
+            last_state.?.file_count != cur_state.file_count or
+            last_state.?.query_len != cur_state.query_len;
+
+        const needs_scroll_only = !needs_full and (last_state.?.cursor != cur_state.cursor or
+            last_state.?.scroll != cur_state.scroll);
+
+        render_buf.clearRetainingCapacity();
+        const w = render_buf.writer(allocator);
+
+        if (needs_full) {
+            // Redesenho completo: limpa tela, header, lista
+            try w.writeAll("\x1b[H\x1b[J");
+
+            // Indicador de scroll acima
+            if (scroll > 0) {
+                try w.print("\x1b[90m  ↑ {} arquivo(s) acima\x1b[0m\r\n", .{scroll});
+            } else {
+                try w.print("\x1b[32mDiretório: {s}\x1b[0m\r\n", .{current_path});
+            }
+
+            if (scroll == 0) {
+                try w.print("\x1b[1mBusca: {s}\x1b[0m\r\n", .{query[0..query_len]});
+                try w.writeAll("---\r\n");
+            }
+
+            try fs.searchFilesWriter(w, files[0..file_count], filtered[0..filtered_count], cursor, scroll);
+        } else if (needs_scroll_only) {
+            // Só o scroll mudou: vai para a linha da lista e redesenha só ela
+            // Header fica intacto — move cursor para linha 4 (após dir, busca, ---)
+            const header_lines: usize = if (scroll > 0) 1 else 3;
+            try w.print("\x1b[{}H\x1b[J", .{header_lines + 1});
+            try fs.searchFilesWriter(w, files[0..file_count], filtered[0..filtered_count], cursor, scroll);
+        }
+        // Se nada mudou, render_buf fica vazio — zero escrita
+
+        if (render_buf.items.len > 0) {
+            try p.print("{s}", .{render_buf.items});
+            try p.flush();
+        }
+
+        last_state = cur_state;
+        full_redraw = false;
+
+        // Lê input
         var buf: [1]u8 = undefined;
         const bytes_lidos = posix.read(posix.STDIN_FILENO, &buf) catch continue;
         if (bytes_lidos == 0) continue;
 
         const key = buf[0];
 
-        if (key == 13 or key == 10) { // ENTER
-            var selected_file: ?[]const u8 = null;
-            for (files[0..file_count]) |*f| {
-                const name = std.mem.span(@as([*:0]const u8, @ptrCast(f)));
-                if (isMatch(name, query[0..query_len])) {
-                    selected_file = name;
-                    break;
+        if (key == 13 or key == 10) {
+            if (filtered_count == 0) continue;
+            const name = std.mem.sliceTo(&files[filtered[cursor]], 0);
+            const stat = std.fs.cwd().statFile(name) catch null;
+            if (stat != null and stat.?.kind == .directory) {
+                std.posix.chdir(std.mem.sliceTo(&files[filtered[cursor]], 0)) catch continue;
+                try fs.openDir(".", &files, &file_count);
+                query_len = 0;
+                cursor = 0;
+                scroll = 0;
+                full_redraw = true;
+            } else {
+                terminal.disableRawMode();
+                if (cmd_prefix) |cmd| {
+                    var child = std.process.Child.init(
+                        &[_][]const u8{ cmd, std.mem.sliceTo(&files[filtered[cursor]], 0) },
+                        allocator,
+                    );
+                    _ = child.spawnAndWait() catch {
+                        try terminal.enableRawMode();
+                        full_redraw = true;
+                        continue;
+                    };
                 }
+                return;
             }
-
-            if (selected_file) |path| {
-                const stat = std.fs.cwd().statFile(path) catch null;
-                if (stat != null and stat.?.kind == .directory) {
-                    // Entra na pasta
-                    std.posix.chdir(path) catch continue;
-                    try openDir(".", &files, &file_count);
-                    query_len = 0; // Reseta a busca ao navegar
-                } else {
-                    // Executa comando no arquivo
-                    disableRawMode();
-                    if (cmd_prefix) |cmd| {
-                        var child = std.process.Child.init(&[_][]const u8{ cmd, path }, allocator);
-                        _ = child.spawnAndWait() catch {
-                            try enableRawMode();
-                            continue;
-                        };
-                    } else {
-                        std.debug.print("\r\nArquivo selecionado: {s}\r\n", .{path});
-                    }
-                    return; 
-                }
-            }
-        } else if (key == 27) { // ESC - VOLTAR PASTA
-            std.posix.chdir("..") catch continue;
-            try openDir(".", &files, &file_count);
-            query_len = 0;
-        } else if (key == 127) { // BACKSPACE
+        } else if (key == 127) {
             if (query_len > 0) {
                 query_len -= 1;
-            } 
-        } else if (key >= 32 and key <= 126) { // CARACTERES DIGITÁVEIS
+                cursor = 0;
+                scroll = 0;
+            }
+        } else if (key >= 32 and key <= 126) {
             addChar(&query, &query_len, key);
-        } 
+            cursor = 0;
+            scroll = 0;
+        }
+
+        if (key == 27) {
+            var seq: [2]u8 = undefined;
+            const n = posix.read(posix.STDIN_FILENO, &seq) catch 0;
+            if (n == 2 and seq[0] == 91) {
+                switch (seq[1]) {
+                    65 => {
+                        if (cursor > 0) cursor -= 1;
+                    },
+                    66 => {
+                        if (cursor + 1 < filtered_count) cursor += 1;
+                    },
+                    else => {},
+                }
+            } else {
+                std.posix.chdir("..") catch continue;
+                try fs.openDir(".", &files, &file_count);
+                query_len = 0;
+                cursor = 0;
+                scroll = 0;
+                full_redraw = true;
+            }
+        }
     }
 }

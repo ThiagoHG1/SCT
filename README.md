@@ -1,67 +1,72 @@
 # SCT - Simple CLI Tool
 
-SCT é um selecionador e navegador de arquivos interativo desenvolvido em **Zig**. Ele permite filtrar arquivos rapidamente via busca fuzzy, navegar entre diretórios e abrir arquivos com comandos específicos (como `nvim`, `nano`, `cat`) diretamente do terminal.
+SCT é um navegador e selecionador de arquivos interativo para o terminal, escrito em **Zig**. Filtre arquivos com busca fuzzy, navegue entre diretórios e abra arquivos com qualquer comando — tudo sem sair do terminal.
 
-## 🚀 Funcionalidades
+## Funcionalidades
 
-- **Navegação de Pastas:** `Enter` para entrar, `ESC` para voltar uma pasta.
-- **Busca Rápida:** Filtro em tempo real (case-insensitive) conforme você digita.
-- **Execução de Comandos:** Abre o arquivo selecionado usando o prefixo passado (ex: `sct nvim`).
-- **Raw Mode:** Captura de teclas instantânea, sem necessidade de confirmar com Enter para filtrar.
-- **Interface Visual:** Cores para diferenciar diretórios e exibição do caminho atual (CWD).
+- **Navegação de pastas** — `Enter` para entrar, `ESC` para voltar
+- **Busca fuzzy em tempo real** — filtragem case-insensitive conforme você digita
+- **Janela deslizante** — exibe até 20 arquivos por vez com indicadores de arquivos acima/abaixo
+- **Execução de comandos** — abre o arquivo selecionado com o prefixo passado (ex: `sct nvim`)
+- **Render diferencial** — redesenha apenas o que mudou, eliminando pisca mesmo no TTY puro
+- **Raw mode** — captura de teclas instantânea sem necessidade de confirmar com Enter
 
-## 📂 Estrutura do Projeto
-
+## Estrutura do Projeto
 ```text
 SCT
 ├── src
-│   ├── main.zig    # Ponto de entrada
-│   ├── Search.zig  # Lógica de busca e navegação
-│   └── Utils.zig   # Utilitários de print e formatação
+│   ├── utils
+│   │   └── Print.zig   # Output bufferizado (flush único por frame)
+│   ├── fs.zig          # Leitura de diretório e renderização da lista
+│   ├── terminal.zig    # Raw mode do terminal
+│   ├── Search.zig      # Lógica principal de busca, navegação e render
+│   └── main.zig        # Ponto de entrada
 └── scripts
-    └── install.sh  # Script de compilação e instalação
+    └── install.sh      # Compilação e instalação
+```
 
-## 🛠️ Instalação
+## Instalação
 
-Você precisará do Zig instalado (testado com a versão 0.15.0 ou superior).
-
+Você precisará do [Zig](https://ziglang.org/) instalado (versão 0.15.x ou superior).
+```bash
 # Clone o repositório
-git clone [https://github.com/ThiagoHG1/SCT.git](https://github.com/ThiagoHG1/SCT.git)
+git clone https://github.com/ThiagoHG1/SCT.git
 cd SCT
 
-# Garanta que o script de instalação tenha permissão
+# Dê permissão ao script
 chmod +x scripts/install.sh
 
-# Execute a instalação
+# Compile e instale
 ./scripts/install.sh
+```
 
-O script irá compilar o binário com otimização (ReleaseSmall) e movê-lo para /usr/local/bin/sct.
+O script compila com otimização `ReleaseSmall` e move o binário para `/usr/local/bin/sct`.
 
-## 💡 Como Usar
+## Como Usar
+```bash
+sct          # Navega e exibe o caminho do arquivo selecionado ao sair
+sct nvim     # Abre o arquivo selecionado no Neovim
+sct cat      # Exibe o conteúdo do arquivo no terminal
+sct nano     # Edita o arquivo com nano
+```
 
-Exemplos de Comandos
+## Controles
 
-sct          # Apenas navega e mostra o caminho do arquivo ao sair
-sct nvim     # Busca um arquivo e abre diretamente no Neovim
-sct cat      # Busca um arquivo e exibe o conteúdo no terminal
+| Tecla | Ação |
+|---|---|
+| Letras / Números | Filtra a lista em tempo real |
+| `↑` / `↓` | Move o cursor entre os arquivos |
+| `Enter` | Entra na pasta ou abre o arquivo com o comando |
+| `ESC` | Volta para o diretório anterior |
+| `Backspace` | Apaga um caractere da busca |
+| `Ctrl+C` | Encerra o programa |
 
-## Controles de Teclado
-Tecla	Ação
-Letras/Números	Digite para filtrar a lista em tempo real.
-Enter	Entra em uma pasta ou seleciona o arquivo para abrir com o comando.
-ESC	Volta para o diretório anterior (..).
-Backspace	Apaga um caractere (Em versões anteriores volta uma pasta assim como ESC).
-Ctrl + C	Encerra o programa e volta ao terminal.
+## Observações Técnicas
 
-## ⚠️ Observações Técnicas
-
-    Limites: Suporta até 1024 itens por diretório e nomes de arquivos com até 256 caracteres.
-
-    Fuzzy Match: A busca ignora maiúsculas/minúsculas para facilitar a digitação rápida.
-
-    Raw Mode: O programa desativa o modo canônico do terminal para processar teclas individualmente, restaurando as configurações originais ao sair.
+- Suporta até 1024 itens por diretório e nomes de até 256 caracteres
+- A busca fuzzy ignora maiúsculas e minúsculas
+- O raw mode é restaurado corretamente ao sair, inclusive após erros
 
 > [!IMPORTANT]
-> Recomenda-se utilizar commits a partir de **8a72e9a**.  
-> Versões anteriores podem causar problemas no TTY, como travamentos ou falhas ao digitar a senha no `sudo`.
-
+> Recomenda-se utilizar commits a partir de **8a72e9a**.
+> Versões anteriores continham uma falha no gerenciamento do raw mode do terminal que, em alguns casos, corrompía o estado do TTY e causava comportamentos inesperados em processos subsequentes que dependem de input do terminal muitas vezes não sendo corrigidos nem mesmo com reinicialização do SO.
